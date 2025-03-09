@@ -4,7 +4,7 @@ import os
 import cv2
 from PyQt5.QtWidgets import (
     QApplication, QLabel, QPushButton, QFileDialog, QVBoxLayout,
-    QWidget, QMessageBox, QScrollArea, QComboBox, QHBoxLayout
+    QWidget, QMessageBox, QScrollArea, QHBoxLayout
 )
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QPolygonF
 from PyQt5.QtCore import Qt, QPoint, QPointF
@@ -16,8 +16,8 @@ class ImageLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True)
-        self.polygons = []
-        self.current_polygon = []
+        self.polygons = []       # 확정된 폴리곤 목록 (각각 "points"만 저장)
+        self.current_polygon = []  # 현재 그리고 있는 폴리곤의 점들
         self.mouse_position = None
 
     def setImage(self, cv_image):
@@ -51,7 +51,7 @@ class ImageLabel(QLabel):
                 self.update()
 
     def paintEvent(self, event):
-        """확정된 폴리곤 + 그리고 있는 폴리곤을 화면에 그려줌"""
+        """확정된 폴리곤과 그리고 있는 폴리곤을 화면에 그려줌"""
         super().paintEvent(event)
         if self.pixmap() is None:
             return
@@ -59,15 +59,13 @@ class ImageLabel(QLabel):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
+        # 확정된 폴리곤 그리기
         pen_confirmed = QPen(Qt.red, 2, Qt.SolidLine)
         painter.setPen(pen_confirmed)
         for poly_data in self.polygons:
             points = poly_data["points"]
-            finger = poly_data["finger"]
 
-            # 폴리곤 그리기
             if len(points) > 2:
-
                 polygon_q = QPolygonF([QPointF(x, y) for x, y in points])
                 painter.setBrush(Qt.red)
                 painter.setOpacity(0.3)
@@ -78,31 +76,21 @@ class ImageLabel(QLabel):
                     p1 = points[i]
                     p2 = points[(i+1) % len(points)]
                     painter.drawLine(QPoint(*p1), QPoint(*p2))
-
-                # 폴리곤 중앙에 손가락 이름 표시 (간단히 무게중심 근사)
-                cx = sum(x for x, _ in points) / len(points)
-                cy = sum(y for _, y in points) / len(points)
-                painter.drawText(QPointF(cx, cy), finger)
             else:
                 for i in range(len(points) - 1):
                     painter.drawLine(QPoint(*points[i]), QPoint(*points[i+1]))
-                if points:
-                    painter.drawText(QPointF(points[0][0]+5, points[0][1]+5), finger)
 
+        # 현재 그리고 있는 폴리곤 그리기
         if self.current_polygon:
             pen_current = QPen(Qt.blue, 2, Qt.SolidLine)
             painter.setPen(pen_current)
-
-            # 현재 폴리곤의 점들을 연결
             for i in range(len(self.current_polygon) - 1):
-                painter.drawLine(QPoint(*self.current_polygon[i]), 
-                                 QPoint(*self.current_polygon[i+1]))
+                painter.drawLine(QPoint(*self.current_polygon[i]), QPoint(*self.current_polygon[i+1]))
 
             if self.mouse_position:
                 dashed_pen = QPen(Qt.blue, 2, Qt.DashLine)
                 painter.setPen(dashed_pen)
-                painter.drawLine(QPoint(*self.current_polygon[-1]),
-                                 QPoint(*self.mouse_position))
+                painter.drawLine(QPoint(*self.current_polygon[-1]), QPoint(*self.mouse_position))
 
 class SegmentationTool(QWidget):
     def __init__(self):
@@ -139,9 +127,6 @@ class SegmentationTool(QWidget):
         self.btn_undo_polygon = QPushButton("마지막 폴리곤 삭제")
         self.btn_undo_polygon.clicked.connect(self.undo_last_polygon)
 
-        self.combo_finger = QComboBox()
-        self.combo_finger.addItems(["엄지", "검지", "중지", "약지", "소지"])
-
         self.btn_finalize_polygon = QPushButton("폴리곤 확정")
         self.btn_finalize_polygon.clicked.connect(self.finalize_polygon)
 
@@ -156,7 +141,6 @@ class SegmentationTool(QWidget):
         layout_polygon = QHBoxLayout()
         layout_polygon.addWidget(self.btn_undo_point)
         layout_polygon.addWidget(self.btn_undo_polygon)
-        layout_polygon.addWidget(self.combo_finger)
         layout_polygon.addWidget(self.btn_finalize_polygon)
 
         layout_main.addLayout(layout_controls)
@@ -165,7 +149,7 @@ class SegmentationTool(QWidget):
         self.setLayout(layout_main)
 
     def load_images(self):
-        """ 이미지 폴더 선택 후 이미지 파일 리스트 불러오기 """
+        """이미지 폴더 선택 후 이미지 파일 리스트 불러오기"""
         folder_path = QFileDialog.getExistingDirectory(self, "이미지 폴더 선택")
         if folder_path:
             self.image_files = [
@@ -183,7 +167,7 @@ class SegmentationTool(QWidget):
                 QMessageBox.warning(self, "경고", "선택한 폴더에 이미지 파일이 없습니다.")
 
     def load_image(self, file_path):
-        """ 단일 이미지 로드 및 화면에 맞게 리사이즈 """
+        """단일 이미지 로드 및 화면에 맞게 리사이즈"""
         self.current_image_path = file_path
         image = cv2.imread(file_path)
         if image is None:
@@ -200,7 +184,7 @@ class SegmentationTool(QWidget):
         self.image_label.setImage(resized)
 
     def load_next_image(self):
-        """ 다음 이미지 로드 """
+        """다음 이미지 로드"""
         if self.current_image_index + 1 < len(self.image_files):
             self.current_image_index += 1
             self.load_image(self.image_files[self.current_image_index])
@@ -220,15 +204,12 @@ class SegmentationTool(QWidget):
             self.image_label.update()
 
     def finalize_polygon(self):
-        """현재 그리고 있는 폴리곤을 확정하여 polygons 목록에 저장"""
-        # 최소 3개 이상의 점이 있어야 폴리곤으로 취급
+        """현재 그리고 있는 폴리곤을 확정하여 목록에 저장"""
         if len(self.image_label.current_polygon) < 3:
             QMessageBox.warning(self, "폴리곤 오류", "폴리곤은 최소 3개 이상의 점이 필요합니다.")
             return
 
-        finger_name = self.combo_finger.currentText()
         polygon_data = {
-            "finger": finger_name,
             "points": self.image_label.current_polygon.copy()
         }
         self.image_label.polygons.append(polygon_data)
@@ -247,7 +228,7 @@ class SegmentationTool(QWidget):
 
         data = {
             "image": self.current_image_path,
-            "nails": self.image_label.polygons
+            "polygons": self.image_label.polygons
         }
 
         filename = os.path.basename(self.current_image_path)
